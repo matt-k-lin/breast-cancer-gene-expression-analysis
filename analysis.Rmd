@@ -1,0 +1,279 @@
+```yaml
+---
+title: "Breast Cancer Gene Expression Analysis in R"
+author: "Matt Lin"
+date: "July 15, 2024"
+output: html_document
+---
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Breast Cancer Gene Expression Analysis in R
+
+## Overview
+
+This project explores RNA-seq expression data and cell motility measurements from the Physical Sciences in Oncology (PS-ON) Cell Line Characterization Study. The goal is to compare gene expression patterns between two breast cancer cell lines with different motility profiles.
+
+The analysis focuses on:
+
+* `T-47D` as the slower cell line
+* `MDA-MB-231` as the faster cell line
+
+## Preliminaries
+
+```{r}
+library(imager)
+```
+
+## Data Import
+
+```{r}
+data_dir <- "data"
+
+load(file.path(data_dir, "PSON.RData"), verbose = TRUE)
+```
+
+The loaded objects are:
+
+* `pson_expr_df`
+* `cell_speeds_df`
+
+These names are descriptive:
+
+* `pson` = Physical Sciences in Oncology
+* `expr` = gene expression data
+* `df` = data frame
+
+## Expression Data
+
+```{r}
+dim(pson_expr_df)
+head(pson_expr_df)
+```
+
+The first column contains gene symbols. The remaining columns contain mRNA expression values measured in TPM.
+
+```{r}
+pson_expr_mat <- as.matrix(pson_expr_df[, -1])
+rownames(pson_expr_mat) <- pson_expr_df$symbol
+
+pson_expr_mat[1:5, 1:5]
+```
+
+## Transcript per Million
+
+Each expression column should sum to approximately one million TPM.
+
+```{r}
+colSums(pson_expr_mat)
+```
+
+The columns are close to one million, though not exact because the original table was tidied and restricted to protein-coding genes.
+
+## Log Transformation
+
+To compress the range of expression values, apply a log2 transformation.
+
+```{r}
+pson_log_mat <- log2(1 + pson_expr_mat)
+pson_log_mat[1:5, 1:5]
+```
+
+Compare the original and transformed values for the first 10 genes.
+
+```{r}
+ngenes <- 10
+
+par(mfrow = c(1, 2))
+par(cex.axis = 0.7)
+
+boxplot(
+  t(pson_expr_mat[1:ngenes, ]),
+  main = "Original data",
+  ylab = "mRNA (TPM)",
+  ylim = c(0, 30),
+  las = 2,
+  pch = 20
+)
+
+boxplot(
+  t(pson_log_mat[1:ngenes, ]),
+  main = "Log-transformed data",
+  ylab = "Log base2 of mRNA",
+  ylim = c(0, 30),
+  las = 2,
+  pch = 20
+)
+```
+
+## Motility Data
+
+```{r}
+colnames(cell_speeds_df)
+head(cell_speeds_df)
+```
+
+Relevant columns:
+
+* `sample`
+* `cellLine`
+* `diagnosis`
+* `experimentalCondition`
+* `summary_metric`
+* `average_value`
+* `total_number_of_cells_tracked`
+
+## Cancer Cell Lines
+
+```{r}
+unique(cell_speeds_df$cellLine)
+unique(cell_speeds_df$diagnosis)
+unique(cell_speeds_df[, c(2, 3)])
+```
+
+The breast cancer cell lines in this study are:
+
+* `T-47D`
+* `MDA-MB-231`
+
+## Hyaluronic Acid and Collagen
+
+The analysis focuses on the `HyaluronicAcid Collagen` experimental condition.
+
+```{r}
+substr_img <- load.image(file.path(data_dir, "substrate.jpg"))
+plot(substr_img, axes = FALSE)
+```
+
+```{r}
+hyal_coll_df <- subset(
+  cell_speeds_df,
+  experimentalCondition == "HyaluronicAcid Collagen"
+)
+
+hyal_coll_df
+```
+
+Filter to the breast cancer cell lines only.
+
+```{r}
+hyal_brca_df <- subset(
+  hyal_coll_df,
+  diagnosis == "Breast Cancer"
+)
+
+hyal_brca_df
+```
+
+The faster line is `MDA-MB-231`, and the slower line is `T-47D`.
+
+```{r}
+hyal_brca_df[, c(2, 6)]
+```
+
+## Expression and Motility Data
+
+Match the experiment names in the motility table with the sample names in the expression matrix.
+
+```{r}
+experiments <- match(hyal_brca_df$sample, colnames(pson_log_mat))
+experiments
+```
+
+Extract the two relevant expression columns.
+
+```{r}
+hyal_brca_log_mat <- pson_log_mat[, experiments]
+colnames(hyal_brca_log_mat) <- c("slow", "fast")
+
+hyal_brca_log_mat[35:50, ]
+```
+
+Some genes have similar expression in both cell lines, while others differ strongly.
+
+## Differential Gene Expression Analysis
+
+Calculate differential gene expression as:
+
+`fast - slow`
+
+```{r}
+dge <- hyal_brca_log_mat[, 2] - hyal_brca_log_mat[, 1]
+DGE_mat <- cbind(hyal_brca_log_mat, dge)
+
+DGE_mat[35:50, ]
+```
+
+Visualize the distribution of differential expression values.
+
+```{r}
+hist(
+  DGE_mat[, 3],
+  main = "Differential gene expression",
+  xlab = "DGE"
+)
+```
+
+Most genes cluster near zero, while a smaller number show strong positive or negative differences.
+
+## Most Differentially Expressed Genes
+
+Rank genes from highest to lowest DGE.
+
+```{r}
+order_dge <- order(dge, decreasing = TRUE)
+DGE_mat_ordered <- DGE_mat[order_dge, ]
+
+head(DGE_mat_ordered, 15)
+```
+
+These are genes with higher expression in the faster cell line.
+
+```{r}
+tail(DGE_mat_ordered, 15)
+```
+
+These are genes with higher expression in the slower cell line.
+
+## Vimentin and Keratin in Motility
+
+The top-ranked gene in the fast cell line is `VIM`, which codes for vimentin. A gene near the bottom is `KRT23`, which codes for keratin.
+
+```{r}
+VIF_KIF_img <- load.image(file.path(data_dir, "VIF_KIF.JPG"))
+plot(VIF_KIF_img, axes = FALSE)
+```
+
+Cells that express vimentin filaments but not keratin filaments are typically more elongated and motile, while cells enriched for keratin are often less motile and more epithelial-like.
+
+## Biological Interpretation
+
+The genes most highly expressed in the fast cell line may help explain increased motility and aggressive behavior. Genes enriched in the slow line may reflect more epithelial characteristics and reduced migration.
+
+## Gene Ontology Inputs
+
+Save the top genes from each group for Gene Ontology analysis.
+
+```{r}
+N <- 100
+
+fast_genes <- rownames(DGE_mat_ordered)[1:N]
+head(fast_genes)
+
+write.csv(fast_genes, "fast_genes.csv", row.names = FALSE, quote = FALSE)
+```
+
+```{r}
+num_rows <- nrow(DGE_mat_ordered)
+slow_genes <- rownames(DGE_mat_ordered)[(num_rows - N):num_rows]
+head(slow_genes)
+
+write.csv(slow_genes, "slow_genes.csv", row.names = FALSE, quote = FALSE)
+```
+
+## Conclusion
+
+This exploratory analysis shows how RNA-seq data can be linked with motility phenotypes to identify genes associated with different breast cancer behaviors. Differential expression patterns highlight genes involved in migration, adhesion, and epithelial-to-mesenchymal transition, supporting the idea that expression profiles can provide useful biological insight.
